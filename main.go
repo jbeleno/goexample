@@ -127,17 +127,37 @@ func temperature(city string, providers ...weatherProvider) (float64, error) {
 type multiWeatherProvider []weatherProvider
 
 func (w multiWeatherProvider) temperature(city string) (float64, error) {
-	sum := 0.0
+	// Crear un canal para las temperaturas y otro canal para los errores
+	// Cada provider va a empujar un valor en cada uno.
+	temps := make(chan float64, len(w))
+	errs := make(chan error, len(w))
 
+	// Para cada proveedor, engendra una goroutine con una función anonima.
+	// Esa función invocará el método temperature y pasará la respuesta.
 	for _, provider := range w {
-		k, err := provider.temperature(city)
-		if err != nil {
-			return 0, err
-		}
-
-		sum += k
+		go func(p weatherProvider) {
+			k, err := p.temperature(city)
+			if err != nil {
+				errs <- err
+				return
+			}
+			temps <- k
+		}(provider)
 	}
 
+	sum := 0.0
+
+	// Recoge la temperatura o un error por cada proveedor
+	for i := 0; i < len(w); i++ {
+		select {
+		case temp := <-temps:
+			sum += temp
+		case err := <-errs:
+			return 0, err
+		}
+	}
+
+	// Retorna el promedio, igual que antes
 	return sum / float64(len(w)), nil
 }
 
